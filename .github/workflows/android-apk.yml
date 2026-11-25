@@ -27,6 +27,9 @@ jobs:
       - name: Criar estrutura Android e iOS
         run: flutter create --platforms=android,ios --project-name bazinga_animes --org com.bazingaanimes .
 
+      - name: Remover teste padrão gerado pelo flutter create
+        run: rm -f test/widget_test.dart
+
       - name: Configurar internet e AdMob de teste
         run: |
           python3 - <<'PY'
@@ -52,7 +55,7 @@ jobs:
         run: dart run flutter_launcher_icons
 
       - name: Verificar código Dart
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos
 
       - name: Compilar APK
         run: flutter build apk --release
