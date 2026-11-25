@@ -3,12 +3,13 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await MobileAds.instance.initialize();
+  // Mostra a interface imediatamente. Uma falha no SDK de anúncios não deve
+  // impedir o aplicativo de abrir.
   runApp(const BazingaApp());
 }
 
@@ -19,7 +20,15 @@ class BazingaApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
         title: 'Bazinga Animes',
         debugShowCheckedModeBanner: false,
-        theme: ThemeData.dark(useMaterial3: true),
+        theme: ThemeData(
+          brightness: Brightness.dark,
+          scaffoldBackgroundColor: const Color(0xFF101014),
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xFFFF0000),
+            brightness: Brightness.dark,
+          ),
+          useMaterial3: true,
+        ),
         home: const BazingaHome(),
       );
 }
@@ -34,8 +43,7 @@ class BazingaHome extends StatefulWidget {
 class _BazingaHomeState extends State<BazingaHome> {
   static final Uri home = Uri.parse('https://bazingaanimes.blogspot.com/');
 
-  // IDs oficiais de teste do Google. Substituir pelos IDs da sua conta
-  // somente depois de testar a integração.
+  // IDs oficiais de teste do Google. Trocar somente pelos IDs da conta do dono.
   static const String _androidBannerTestId =
       'ca-app-pub-3940256099942544/6300978111';
   static const String _iosBannerTestId =
@@ -47,50 +55,75 @@ class _BazingaHomeState extends State<BazingaHome> {
   late final WebViewController controller;
   BannerAd? _bannerAd;
   bool _bannerLoaded = false;
-  int progress = 0;
-  bool failed = false;
+  bool _pageFailed = false;
+  bool _adsInitialized = false;
+  int _progress = 0;
 
   @override
   void initState() {
     super.initState();
-    _loadBanner();
+    _createWebView();
+    _initializeAdsSafely();
+  }
+
+  void _createWebView() {
     controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(const Color(0xFF101014))
-      ..setNavigationDelegate(NavigationDelegate(
-        onProgress: (value) {
-          if (mounted) setState(() => progress = value);
-        },
-        onPageStarted: (_) {
-          if (mounted) setState(() => failed = false);
-        },
-        onWebResourceError: (error) {
-          if (error.isForMainFrame == true && mounted) {
-            setState(() => failed = true);
-          }
-        },
-        onNavigationRequest: (request) async {
-          final uri = Uri.tryParse(request.url);
-          if (uri == null) return NavigationDecision.prevent;
-          if (uri.scheme != 'https' && uri.scheme != 'http') {
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-            return NavigationDecision.prevent;
-          }
-          final host = uri.host.toLowerCase();
-          if (host != 'bazingaanimes.blogspot.com' &&
-              host != 'accounts.google.com' &&
-              !host.endsWith('.blogger.com') &&
-              host != 'blogger.com') {
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-            return NavigationDecision.prevent;
-          }
-          return NavigationDecision.navigate;
-        },
-      ))
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onProgress: (value) {
+            if (mounted) setState(() => _progress = value);
+          },
+          onPageStarted: (_) {
+            if (mounted) setState(() => _pageFailed = false);
+          },
+          onWebResourceError: (error) {
+            if (error.isForMainFrame == true && mounted) {
+              setState(() => _pageFailed = true);
+            }
+          },
+          onNavigationRequest: (request) async {
+            final uri = Uri.tryParse(request.url);
+            if (uri == null) return NavigationDecision.prevent;
+
+            if (uri.scheme != 'https' && uri.scheme != 'http') {
+              try {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              } catch (_) {}
+              return NavigationDecision.prevent;
+            }
+
+            final host = uri.host.toLowerCase();
+            final isInternal = host == 'bazingaanimes.blogspot.com' ||
+                host == 'accounts.google.com' ||
+                host == 'blogger.com' ||
+                host.endsWith('.blogger.com');
+            if (!isInternal) {
+              try {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              } catch (_) {}
+              return NavigationDecision.prevent;
+            }
+            return NavigationDecision.navigate;
+          },
+        ),
+      )
       ..loadRequest(home);
   }
 
+  Future<void> _initializeAdsSafely() async {
+    try {
+      await MobileAds.instance.initialize();
+      _adsInitialized = true;
+      if (mounted) _loadBanner();
+    } catch (_) {
+      // O site continua disponível mesmo se o AdMob não inicializar.
+    }
+  }
+
   void _loadBanner() {
+    if (!_adsInitialized || !mounted || _bannerAd != null) return;
     final ad = BannerAd(
       adUnitId: _bannerAdUnitId,
       request: const AdRequest(),
@@ -108,17 +141,21 @@ class _BazingaHomeState extends State<BazingaHome> {
         },
         onAdFailedToLoad: (ad, error) {
           ad.dispose();
-          // O app continua funcionando normalmente se não houver anúncio.
+          // Falha de anúncio não fecha nem bloqueia o aplicativo.
         },
       ),
     );
     ad.load();
   }
 
-  Future<void> back() async {
-    if (await controller.canGoBack()) {
-      await controller.goBack();
-    } else {
+  Future<void> _goBack() async {
+    try {
+      if (await controller.canGoBack()) {
+        await controller.goBack();
+      } else {
+        await SystemNavigator.pop();
+      }
+    } catch (_) {
       await SystemNavigator.pop();
     }
   }
@@ -133,46 +170,54 @@ class _BazingaHomeState extends State<BazingaHome> {
   Widget build(BuildContext context) => PopScope(
         canPop: false,
         onPopInvokedWithResult: (didPop, result) {
-          if (!didPop) back();
+          if (!didPop) _goBack();
         },
         child: Scaffold(
           backgroundColor: const Color(0xFF101014),
           body: SafeArea(
-            child: Column(children: [
-              if (progress < 100)
-                LinearProgressIndicator(
-                  value: progress / 100,
-                  minHeight: 2,
+            child: Column(
+              children: [
+                if (_progress < 100)
+                  LinearProgressIndicator(
+                    value: _progress / 100,
+                    minHeight: 2,
+                  ),
+                Expanded(
+                  child: _pageFailed
+                      ? Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text(
+                                  'Não foi possível carregar o Bazinga Animes.',
+                                  textAlign: TextAlign.center,
+                                ),
+                                const SizedBox(height: 12),
+                                FilledButton(
+                                  onPressed: () {
+                                    setState(() => _pageFailed = false);
+                                    controller.loadRequest(home);
+                                  },
+                                  child: const Text('Tentar novamente'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      : WebViewWidget(controller: controller),
                 ),
-              Expanded(
-                child: failed
-                    ? Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text(
-                              'Não foi possível carregar o Bazinga Animes.',
-                            ),
-                            const SizedBox(height: 12),
-                            FilledButton(
-                              onPressed: () => controller.loadRequest(home),
-                              child: const Text('Tentar novamente'),
-                            ),
-                          ],
-                        ),
-                      )
-                    : WebViewWidget(controller: controller),
-              ),
-            ]),
+              ],
+            ),
           ),
-          // Banner nativo do AdMob fica fora da WebView, sem cobrir o site.
           bottomNavigationBar: _bannerLoaded && _bannerAd != null
               ? SafeArea(
                   top: false,
                   child: SizedBox(
                     width: _bannerAd!.size.width.toDouble(),
                     height: _bannerAd!.size.height.toDouble(),
-                    child: AdWidget(ad: _bannerAd!),
+                    child: Center(child: AdWidget(ad: _bannerAd!)),
                   ),
                 )
               : null,
