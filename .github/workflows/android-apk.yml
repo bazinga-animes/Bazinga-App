@@ -1,44 +1,59 @@
 name: Gerar APK Bazinga Animes
+
 on:
   workflow_dispatch:
   push:
     branches: [main, master]
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Obter arquivos
         uses: actions/checkout@v4
+
       - name: Preparar Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
       - name: Instalar Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+
       - name: Criar estrutura Android
         run: flutter create --platforms=android --project-name bazinga_animes --org com.bazingaanimes .
-      - name: Permitir acesso a internet
+
+      - name: Configurar Internet e AdMob de teste
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p = Path('android/app/src/main/AndroidManifest.xml')
           s = p.read_text()
-          if 'android.permission.INTERNET' not in s:
-              s = s.replace('<manifest ', '<manifest ', 1).replace('>', '>\n    <uses-permission android:name="android.permission.INTERNET" />', 1)
+          permission = '<uses-permission android:name="android.permission.INTERNET" />'
+          if permission not in s:
+              s = s.replace('<application', permission + '\\n    <application', 1)
+          app_id = '''        <meta-data
+                  android:name="com.google.android.gms.ads.APPLICATION_ID"
+                  android:value="ca-app-pub-3940256099942544~3347511713" />'''
+          if 'com.google.android.gms.ads.APPLICATION_ID' not in s:
+              s = s.replace('</application>', app_id + '\\n    </application>', 1)
           s = s.replace('android:label="bazinga_animes"', 'android:label="Bazinga Animes"')
           p.write_text(s)
           PY
+
       - name: Baixar dependencias
         run: flutter pub get
+
       - name: Compilar APK
         run: flutter build apk --release
+
       - name: Disponibilizar APK
         uses: actions/upload-artifact@v4
         with:
-          name: Bazinga-Animes-APK
+          name: Bazinga-Animes-APK-AdMob-Teste
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
