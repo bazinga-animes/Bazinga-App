@@ -55,6 +55,24 @@ class _BazingaHomeState extends State<BazingaHome> {
   static const String _iosTestBannerId =
       'ca-app-pub-3940256099942544/2934735716';
 
+  // Anúncio intersticial (tela cheia).
+  // ID real: usado só no APK release. Se ficar vazio, usa o ID de TESTE.
+  static const String _realInterstitialId =
+      'ca-app-pub-7102905249789565/7503495509';
+  static const String _testInterstitialId =
+      'ca-app-pub-3940256099942544/1033173712';
+  static const String _iosTestInterstitialId =
+      'ca-app-pub-3940256099942544/4411468910';
+
+  // Tempo mínimo entre dois intersticiais.
+  static const Duration _interstitialInterval = Duration(minutes: 5);
+
+  String get _interstitialId => Platform.isIOS
+      ? _iosTestInterstitialId
+      : (kReleaseMode && _realInterstitialId.isNotEmpty
+          ? _realInterstitialId
+          : _testInterstitialId);
+
   String get _bannerId => Platform.isIOS
       ? _iosTestBannerId
       : (kReleaseMode ? _realBannerId : _testBannerId);
@@ -64,6 +82,11 @@ class _BazingaHomeState extends State<BazingaHome> {
   bool _bannerLoaded = false;
   int _progress = 0;
   bool _failed = false;
+
+  InterstitialAd? _interstitial;
+  bool _showingInterstitial = false;
+  // Começa a contar quando o app abre: o 1º anúncio só vem após o intervalo.
+  DateTime _lastInterstitial = DateTime.now();
 
   // Vídeo em tela cheia (botão de tela cheia do player do site).
   Widget? _fullscreenWidget;
@@ -82,6 +105,7 @@ class _BazingaHomeState extends State<BazingaHome> {
           onPageStarted: (_) {
             if (mounted) setState(() => _failed = false);
           },
+          onPageFinished: (_) => _maybeShowInterstitial(),
           onWebResourceError: (error) {
             if (error.isForMainFrame == true && mounted) {
               setState(() => _failed = true);
@@ -135,6 +159,7 @@ class _BazingaHomeState extends State<BazingaHome> {
     try {
       await MobileAds.instance.initialize();
       if (!mounted) return;
+      _loadInterstitial();
       final ad = BannerAd(
         adUnitId: _bannerId,
         request: const AdRequest(),
@@ -162,7 +187,60 @@ class _BazingaHomeState extends State<BazingaHome> {
   @override
   void dispose() {
     _bannerAd?.dispose();
+    _interstitial?.dispose();
     super.dispose();
+  }
+
+  void _loadInterstitial() {
+    InterstitialAd.load(
+      adUnitId: _interstitialId,
+      request: const AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) {
+          if (!mounted) {
+            ad.dispose();
+            return;
+          }
+          _interstitial = ad;
+        },
+        onAdFailedToLoad: (error) {
+          _interstitial = null;
+          // Tenta de novo depois de 1 minuto.
+          Future.delayed(const Duration(minutes: 1), () {
+            if (mounted && _interstitial == null) _loadInterstitial();
+          });
+        },
+      ),
+    );
+  }
+
+  // Mostra o intersticial quando o visitante abre uma nova página, desde que:
+  // passou o intervalo, não há vídeo em tela cheia e o anúncio já carregou.
+  void _maybeShowInterstitial() {
+    final ad = _interstitial;
+    if (ad == null || _showingInterstitial || !mounted) return;
+    if (_fullscreenWidget != null) return;
+    if (DateTime.now().difference(_lastInterstitial) < _interstitialInterval) {
+      return;
+    }
+
+    ad.fullScreenContentCallback = FullScreenContentCallback(
+      onAdDismissedFullScreenContent: (ad) {
+        ad.dispose();
+        _interstitial = null;
+        _showingInterstitial = false;
+        _lastInterstitial = DateTime.now();
+        _loadInterstitial();
+      },
+      onAdFailedToShowFullScreenContent: (ad, error) {
+        ad.dispose();
+        _interstitial = null;
+        _showingInterstitial = false;
+        _loadInterstitial();
+      },
+    );
+    _showingInterstitial = true;
+    ad.show();
   }
 
   // Entra em tela cheia: deita a tela e esconde as barras do sistema.
