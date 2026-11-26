@@ -72,17 +72,90 @@ jobs:
       - name: Verificar código
         run: flutter analyze --no-fatal-infos
 
-      - name: Compilar APK release
-        run: flutter build apk --release --no-shrink
+      - name: Regras ProGuard para o AdMob
+        run: |
+          cat > android/app/proguard-rules.pro <<'EOF'
+          -keep class com.google.android.gms.ads.** { *; }
+          -keep class com.google.android.gms.internal.ads.** { *; }
+          -keep class io.flutter.plugins.googlemobileads.** { *; }
+          -keep class io.flutter.plugins.webviewflutter.** { *; }
+          -dontwarn com.google.android.gms.**
+          EOF
+          python3 - <<'PY'
+          from pathlib import Path
+          kts = Path('android/app/build.gradle.kts')
+          groovy = Path('android/app/build.gradle')
+          if kts.exists():
+              kts.write_text(kts.read_text() + """
+          android {
+              buildTypes {
+                  getByName("release") {
+                      proguardFiles("proguard-rules.pro")
+                  }
+              }
+          }
+          """)
+          else:
+              groovy.write_text(groovy.read_text() + """
+          android {
+              buildTypes {
+                  release {
+                      proguardFiles 'proguard-rules.pro'
+                  }
+              }
+          }
+          """)
+          PY
+          mkdir -p out
 
-      - name: Compilar APK debug (para diagnóstico)
-        run: flutter build apk --debug
+      - name: APK release A (R8 ligado, com regras do AdMob)
+        run: |
+          flutter build apk --release
+          cp build/app/outputs/flutter-apk/app-release.apk out/app-release-A-com-regras.apk
+
+      - name: Desligar R8 por completo
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          kts = Path('android/app/build.gradle.kts')
+          groovy = Path('android/app/build.gradle')
+          if kts.exists():
+              kts.write_text(kts.read_text() + """
+          android {
+              buildTypes {
+                  getByName("release") {
+                      isMinifyEnabled = false
+                      isShrinkResources = false
+                  }
+              }
+          }
+          """)
+          else:
+              groovy.write_text(groovy.read_text() + """
+          android {
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                      shrinkResources false
+                  }
+              }
+          }
+          """)
+          PY
+
+      - name: APK release B (R8 desligado)
+        run: |
+          flutter build apk --release --no-shrink
+          cp build/app/outputs/flutter-apk/app-release.apk out/app-release-B-sem-r8.apk
+
+      - name: APK debug (ID de teste)
+        run: |
+          flutter build apk --debug
+          cp build/app/outputs/flutter-apk/app-debug.apk out/app-debug.apk
 
       - name: Disponibilizar APKs
         uses: actions/upload-artifact@v4
         with:
           name: Bazinga-Animes-APK
-          path: |
-            build/app/outputs/flutter-apk/app-release.apk
-            build/app/outputs/flutter-apk/app-debug.apk
+          path: out/*.apk
           if-no-files-found: error
