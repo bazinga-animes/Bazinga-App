@@ -33,7 +33,7 @@ jobs:
       - name: Remover teste padrão
         run: rm -f test/widget_test.dart
 
-      - name: Permitir internet e nomear o app
+      - name: Configurar manifesto (internet e AdMob)
         run: |
           python3 - <<'PY'
           import re
@@ -43,11 +43,25 @@ jobs:
           perm = '<uses-permission android:name="android.permission.INTERNET" />'
           if 'android.permission.INTERNET' not in s:
               s = re.sub(r'<application\b', perm + '\n    <application', s, count=1)
+          app_id = ('<meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" '
+                    'android:value="ca-app-pub-7102905249789565~8127679017" />')
+          if 'com.google.android.gms.ads.APPLICATION_ID' not in s:
+              s = s.replace('</application>', '    ' + app_id + '\n    </application>', 1)
           s = s.replace('android:label="bazinga_animes"', 'android:label="Bazinga Animes"')
           p.write_text(s)
+
+          # Validação: o ID do AdMob precisa estar DENTRO de <application>.
+          import xml.etree.ElementTree as ET
+          ns = '{http://schemas.android.com/apk/res/android}'
+          root = ET.parse(p).getroot()
+          app = root.find('application')
+          names = [m.get(ns + 'name') for m in app.findall('meta-data')]
+          assert 'com.google.android.gms.ads.APPLICATION_ID' in names, names
+          perms = [u.get(ns + 'name') for u in root.findall('uses-permission')]
+          assert 'android.permission.INTERNET' in perms, perms
+          print('Manifesto OK')
           PY
           cat android/app/src/main/AndroidManifest.xml
-          grep -q "android.permission.INTERNET" android/app/src/main/AndroidManifest.xml
 
       - name: Baixar dependências
         run: flutter pub get
