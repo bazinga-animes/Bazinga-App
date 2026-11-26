@@ -1,18 +1,7 @@
-# Bazinga Animes — AdMob e ícone
+# Bazinga Animes (versão mínima)
 
-Projeto Flutter do aplicativo Bazinga Animes, que abre https://bazingaanimes.blogspot.com/.
+App Flutter que abre https://bazingaanimes.blogspot.com/ em um WebView.
+Esta versão NÃO tem AdMob, de propósito: serve para confirmar que o app abre.
+Depois de confirmado, o AdMob é adicionado em uma etapa separada.
 
-## Alterações desta versão
-- Inicializa a interface antes do SDK do AdMob para que uma falha de anúncios não impeça a abertura do app.
-- Inicialização do AdMob protegida por `try/catch`; o site continua acessível se o SDK falhar.
-- Banner oficial de teste do Google, sem IDs reais de monetização.
-- Ícone do app baseado na logo fornecida, configurado para Android e iOS.
-- Workflow do GitHub Actions gera estrutura Android/iOS e compila APK Android.
-
-## Compilar
-O GitHub Actions executa a compilação ao enviar os arquivos para `main` ou manualmente em Actions.
-
-O workflow gera o APK Android. Para gerar IPA de iPhone é necessário executar a compilação iOS em um Mac com Xcode e configurar assinatura Apple.
-
-## Observação de diagnóstico
-A alteração reduz causas prováveis de falha na inicialização, especialmente uma falha do SDK de anúncios antes de `runApp`. Se o aplicativo ainda fechar, será necessário obter o erro de execução do Android (Logcat), pois o log de compilação não identifica a exceção que ocorre no aparelho.
+O GitHub Actions gera dois APKs: `app-release.apk` (normal) e `app-debug.apk` (diagnóstico).
