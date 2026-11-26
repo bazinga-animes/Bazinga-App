@@ -1,7 +1,6 @@
-# Bazinga Animes (versão mínima)
+# Bazinga Animes (AdMob real)
 
-App Flutter que abre https://bazingaanimes.blogspot.com/ em um WebView.
-Esta versão NÃO tem AdMob, de propósito: serve para confirmar que o app abre.
-Depois de confirmado, o AdMob é adicionado em uma etapa separada.
-
-O GitHub Actions gera dois APKs: `app-release.apk` (normal) e `app-debug.apk` (diagnóstico).
+WebView do https://bazingaanimes.blogspot.com/ com banner AdMob.
+- APK release: ID real do banner.
+- APK debug: ID de teste do Google (seguro para testar).
+IDs: app ca-app-pub-7102905249789565~8127679017 | banner ca-app-pub-7102905249789565/2731882102
