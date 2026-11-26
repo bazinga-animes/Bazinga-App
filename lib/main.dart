@@ -63,8 +63,22 @@ class _BazingaHomeState extends State<BazingaHome> {
   void initState() {
     super.initState();
     _createWebView();
-    _initializeAdsSafely();
+    // Só inicia o AdMob depois que a tela já abriu e o site começou a carregar.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(seconds: 3), _initializeAdsSafely);
+    });
   }
+
+  // O Blogger redireciona para o domínio do país (ex.: .blogspot.com.br).
+  // Todos eles precisam abrir dentro do aplicativo.
+  static final RegExp _blogHost =
+      RegExp(r'^bazingaanimes\.blogspot\.[a-z]{2,3}(\.[a-z]{2})?$');
+
+  static bool _isInternalHost(String host) =>
+      _blogHost.hasMatch(host) ||
+      host == 'accounts.google.com' ||
+      host == 'blogger.com' ||
+      host.endsWith('.blogger.com');
 
   void _createWebView() {
     controller = WebViewController()
@@ -84,8 +98,19 @@ class _BazingaHomeState extends State<BazingaHome> {
             }
           },
           onNavigationRequest: (request) async {
+            // Quadros internos da página (iframes, comentários, vídeos, etc.)
+            // sempre carregam dentro do app.
+            if (!request.isMainFrame) return NavigationDecision.navigate;
+
             final uri = Uri.tryParse(request.url);
             if (uri == null) return NavigationDecision.prevent;
+
+            if (uri.scheme == 'about' ||
+                uri.scheme == 'data' ||
+                uri.scheme == 'blob' ||
+                uri.scheme == 'javascript') {
+              return NavigationDecision.navigate;
+            }
 
             if (uri.scheme != 'https' && uri.scheme != 'http') {
               try {
@@ -94,12 +119,7 @@ class _BazingaHomeState extends State<BazingaHome> {
               return NavigationDecision.prevent;
             }
 
-            final host = uri.host.toLowerCase();
-            final isInternal = host == 'bazingaanimes.blogspot.com' ||
-                host == 'accounts.google.com' ||
-                host == 'blogger.com' ||
-                host.endsWith('.blogger.com');
-            if (!isInternal) {
+            if (!_isInternalHost(uri.host.toLowerCase())) {
               try {
                 await launchUrl(uri, mode: LaunchMode.externalApplication);
               } catch (_) {}
