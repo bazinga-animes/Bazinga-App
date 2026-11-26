@@ -1,5 +1,9 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -37,7 +41,20 @@ class _BazingaHomeState extends State<BazingaHome> {
   static final RegExp _blogHost =
       RegExp(r'^bazingaanimes\.blogspot\.[a-z]{2,3}(\.[a-z]{2})?$');
 
+  // ID real do banner (usado só no APK release). Em debug usa o ID de TESTE
+  // do Google, para evitar cliques acidentais em anúncios reais.
+  static const String _realBannerId = 'ca-app-pub-7102905249789565/2731882102';
+  static const String _testBannerId = 'ca-app-pub-3940256099942544/6300978111';
+  static const String _iosTestBannerId =
+      'ca-app-pub-3940256099942544/2934735716';
+
+  String get _bannerId => Platform.isIOS
+      ? _iosTestBannerId
+      : (kReleaseMode ? _realBannerId : _testBannerId);
+
   late final WebViewController _controller;
+  BannerAd? _bannerAd;
+  bool _bannerLoaded = false;
   int _progress = 0;
   bool _failed = false;
 
@@ -88,6 +105,45 @@ class _BazingaHomeState extends State<BazingaHome> {
         ),
       )
       ..loadRequest(home);
+
+    // O AdMob só inicia depois que a tela abriu e o site começou a carregar.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future.delayed(const Duration(seconds: 3), _startAds);
+    });
+  }
+
+  Future<void> _startAds() async {
+    try {
+      await MobileAds.instance.initialize();
+      if (!mounted) return;
+      final ad = BannerAd(
+        adUnitId: _bannerId,
+        request: const AdRequest(),
+        size: AdSize.banner,
+        listener: BannerAdListener(
+          onAdLoaded: (ad) {
+            if (!mounted) {
+              ad.dispose();
+              return;
+            }
+            setState(() {
+              _bannerAd = ad as BannerAd;
+              _bannerLoaded = true;
+            });
+          },
+          onAdFailedToLoad: (ad, error) => ad.dispose(),
+        ),
+      );
+      await ad.load();
+    } catch (_) {
+      // Falha de anúncio nunca deve atrapalhar o site.
+    }
+  }
+
+  @override
+  void dispose() {
+    _bannerAd?.dispose();
+    super.dispose();
   }
 
   Future<void> _onBack() async {
@@ -133,6 +189,16 @@ class _BazingaHomeState extends State<BazingaHome> {
               ],
             ),
           ),
+          bottomNavigationBar: _bannerLoaded && _bannerAd != null
+              ? SafeArea(
+                  top: false,
+                  child: SizedBox(
+                    width: _bannerAd!.size.width.toDouble(),
+                    height: _bannerAd!.size.height.toDouble(),
+                    child: AdWidget(ad: _bannerAd!),
+                  ),
+                )
+              : null,
         ),
       );
 }
