@@ -6,8 +6,15 @@ import 'package:flutter/services.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Fora do modo tela cheia de vídeo, o app fica em pé (retrato).
+  await SystemChrome.setPreferredOrientations(const [
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
   runApp(const BazingaApp());
 }
 
@@ -58,6 +65,10 @@ class _BazingaHomeState extends State<BazingaHome> {
   int _progress = 0;
   bool _failed = false;
 
+  // Vídeo em tela cheia (botão de tela cheia do player do site).
+  Widget? _fullscreenWidget;
+  VoidCallback? _requestExitFullscreen;
+
   @override
   void initState() {
     super.initState();
@@ -106,6 +117,14 @@ class _BazingaHomeState extends State<BazingaHome> {
       )
       ..loadRequest(home);
 
+    final platform = _controller.platform;
+    if (platform is AndroidWebViewController) {
+      platform.setCustomWidgetCallbacks(
+        onShowCustomWidget: _enterFullscreen,
+        onHideCustomWidget: _leaveFullscreen,
+      );
+    }
+
     // O AdMob só inicia depois que a tela abriu e o site começou a carregar.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Future.delayed(const Duration(seconds: 3), _startAds);
@@ -146,10 +165,70 @@ class _BazingaHomeState extends State<BazingaHome> {
     super.dispose();
   }
 
+  // Entra em tela cheia: deita a tela e esconde as barras do sistema.
+  void _enterFullscreen(Widget widget, VoidCallback onHidden) {
+    SystemChrome.setPreferredOrientations(const [
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    if (!mounted) return;
+    setState(() {
+      _fullscreenWidget = widget;
+      _requestExitFullscreen = onHidden;
+    });
+  }
+
+  // Sai da tela cheia: volta para retrato e mostra as barras.
+  void _leaveFullscreen() {
+    SystemChrome.setPreferredOrientations(const [
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    if (!mounted) return;
+    setState(() {
+      _fullscreenWidget = null;
+      _requestExitFullscreen = null;
+    });
+  }
+
+  Future<bool> _confirmExit() async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sair do Bazinga Animes?'),
+        content: const Text('Tem certeza que deseja sair do aplicativo?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Sair'),
+          ),
+        ],
+      ),
+    );
+    return result ?? false;
+  }
+
   Future<void> _onBack() async {
+    // 1) Em tela cheia, o botão voltar só sai da tela cheia.
+    if (_fullscreenWidget != null) {
+      _requestExitFullscreen?.call();
+      _leaveFullscreen();
+      return;
+    }
+    // 2) Se o site tem página anterior, volta nela.
     if (await _controller.canGoBack()) {
       await _controller.goBack();
-    } else {
+      return;
+    }
+    // 3) Na página inicial, pergunta antes de sair.
+    if (!mounted) return;
+    if (await _confirmExit()) {
       await SystemNavigator.pop();
     }
   }
@@ -161,35 +240,52 @@ class _BazingaHomeState extends State<BazingaHome> {
           if (!didPop) _onBack();
         },
         child: Scaffold(
-          body: SafeArea(
-            child: Column(
-              children: [
-                if (_progress < 100)
-                  LinearProgressIndicator(value: _progress / 100, minHeight: 2),
-                Expanded(
-                  child: _failed
-                      ? Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Text('Não foi possível carregar o site.'),
-                              const SizedBox(height: 12),
-                              FilledButton(
-                                onPressed: () {
-                                  setState(() => _failed = false);
-                                  _controller.loadRequest(home);
-                                },
-                                child: const Text('Tentar novamente'),
+          body: Stack(
+            children: [
+              SafeArea(
+                child: Column(
+                  children: [
+                    if (_progress < 100)
+                      LinearProgressIndicator(
+                        value: _progress / 100,
+                        minHeight: 2,
+                      ),
+                    Expanded(
+                      child: _failed
+                          ? Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text(
+                                    'Não foi possível carregar o site.',
+                                  ),
+                                  const SizedBox(height: 12),
+                                  FilledButton(
+                                    onPressed: () {
+                                      setState(() => _failed = false);
+                                      _controller.loadRequest(home);
+                                    },
+                                    child: const Text('Tentar novamente'),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                        )
-                      : WebViewWidget(controller: _controller),
+                            )
+                          : WebViewWidget(controller: _controller),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              if (_fullscreenWidget != null)
+                Positioned.fill(
+                  child: ColoredBox(
+                    color: Colors.black,
+                    child: _fullscreenWidget!,
+                  ),
+                ),
+            ],
           ),
-          bottomNavigationBar: _bannerLoaded && _bannerAd != null
+          bottomNavigationBar:
+              _bannerLoaded && _bannerAd != null && _fullscreenWidget == null
               ? SafeArea(
                   top: false,
                   child: SizedBox(
